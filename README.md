@@ -11,6 +11,12 @@
 5. cd ~/../../tyt_nichego_net/Obsi - открывает в командной строке на компе нужный локальный репозиторий
 
 порядок, в котором нужно сохранять:
-1. ```bash git add .```
-1. ```bash git commit -m "commit_name"```
-1. ```bash git -u origin main```
+1. ```bash
+   git add .
+   ```
+2. ```bash
+   git commit -m "commit_name"
+   ```
+3. ```bash
+   git -u origin main
+   ```
