@@ -18,5 +18,5 @@
    git commit -m "commit_name"
    ```
 3. ```bash
-   git -u origin main
+   git push -u origin main
    ```
