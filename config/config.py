@@ -4,6 +4,10 @@ import os
 import logging
 from dotenv import load_dotenv
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Этот относительный путь к JSON
+CHECKLISTS_FILE = "checklists.json"
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)

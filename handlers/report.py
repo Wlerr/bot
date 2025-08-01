@@ -1,57 +1,55 @@
 # handlers/report.py
 
 from telegram.ext import ContextTypes
+from telegram.constants import ParseMode
 from config.config import REPORT_CHAT_IDS
+from utils.storage import user_progress
+from handlers.checklist import STATUS_ICONS
+
+
+parse_mode=ParseMode.MARKDOWN
 
 async def report_handler(update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Собирает статистику и копию чек-листа, и шлёт её в GROUP_CHAT_ID из конфига.
-    """
-    from utils.storage import user_progress
+    
 
     query = update.callback_query
     await query.answer()
-
     _, ck_id = query.data.split("|", 1)
     data = user_progress[ck_id]
 
-    place = data["place"]
-    total = len(data["status"])
-    done = sum(data["status"])
-    user = data["user"]
-    ts = data["timestamp"]
-    title = data["title"]
+    # Собираем статистику
+    total = len(data["items"])
+    counts = {
+        "done": data["status"].count("done"),
+        "skipped": data["status"].count("skipped"),
+        "ignored": data["status"].count("ignored"),
+        "none": data["status"].count(None)
+    }
 
-    # Собираем копию чек-листа
+    # Собираем финальный текст чек-листа
     lines = []
-    for item, ok in zip(data["items"], data["status"]):
-        symbol = "✅" if ok else "🔲"
-        lines.append(f"{symbol} {item}")
+    for status, text in zip(data["status"], data["items"]):
+        lines.append(f"{STATUS_ICONS[status]} {text}")
     checklist_copy = "\n".join(lines)
 
-    # Текст отчёта
-    report_text = (
-        f"📋 *Отчет по чек-листу*: {title}\n"
-        f"👤 *Сотрудник*: {user}\n"
-        f"🕒 *Начало*: {ts}\n"
-        f"✅ Выполнено: *{done}* из *{total}*\n\n"
+    report = (
+        f"📋 *Отчет по чек-листу*: {data['title']}\n"
+        f"👤 *Сотрудник*: {data['user']}\n"
+        f"🕒 *Начало*: {data['timestamp']}\n\n"
+        f"✅ Выполнено: *{counts['done']}*\n"
+        f"❌ Не выполнено: *{counts['skipped']}*\n"
+        f"⚪ Проигнорировано: *{counts['ignored']}*\n"
+        f"⬜ Не отмечено: *{counts['none']}*\n\n"
         f"📝 *Копия чек-листа:*\n{checklist_copy}"
     )
 
-    # Подтверждаем в личке
-    await query.edit_message_text("Спасибо! Ваш отчёт отправлен ✅")
-
-    # Отправляем в группу, назначенную для этой чайной
-    report_chat_id = REPORT_CHAT_IDS.get(place)
-    if report_chat_id is None:
-        # fallback: в личку
-        report_chat_id = query.message.chat.id
-
-    await context.bot.send_message(
-        chat_id=report_chat_id,
-        text=report_text,
-        parse_mode="Markdown"
+    # Заменяем интерактивное сообщение на статичный отчёт
+    await context.bot.edit_message_text(
+        chat_id=data["chat_id"],
+        message_id=data["message_id"],
+        text=report,
+        parse_mode=ParseMode.MARKDOWN
     )
 
-    # (опционально) очистить прогресс
+    # (опционально) чистим прогресс
     del user_progress[ck_id]

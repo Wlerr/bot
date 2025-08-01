@@ -2,55 +2,57 @@
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-async def send_checklist(query, ck_id: str):
+
+STATUS_ICONS = {
+    None: "⬜",       # не отмечено
+    "done": "✅",    # выполнено
+    "skipped": "❌", # не выполнено
+    "ignored": "⚪"  # проигнорировано
+}
+
+def next_status(current):
+    order = [None, "done", "skipped", "ignored"]
+    idx = order.index(current)
+    return order[(idx + 1) % len(order)]
+
+
+async def send_checklist(bot, ck_id: str):
     """
-    Собирает список кнопок, используя индексы вместо полных текстов.
+    Рисует или обновляет чек-лист в общем чате.
     """
     from utils.storage import user_progress
-
     data = user_progress[ck_id]
-    items = data["items"]
-    status = data["status"]
+    chat_id = data["chat_id"]
+    msg_id = data["message_id"]
 
     keyboard = []
-    for i, text in enumerate(items):
-        symbol = "✅" if status[i] else "🔲"
-        # callback_data: toggle|<id>|<index>
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{symbol} {text}",
-                callback_data=f"toggle|{ck_id}|{i}"
-            )
-        ])
+    for idx, text in enumerate(data["items"]):
+        icon = STATUS_ICONS[data["status"][idx]]
+        cb = f"toggle|{ck_id}|{idx}"
+        keyboard.append([InlineKeyboardButton(f"{icon} {text}", callback_data=cb)])
 
-    keyboard.append([
-        InlineKeyboardButton(
-            "📤 Отправить отчет",
-            callback_data=f"report|{ck_id}"
-        )
-    ])
+    keyboard.append([InlineKeyboardButton("📤 Отправить отчёт", callback_data=f"report|{ck_id}")])
 
-    await query.edit_message_text(
-        text="📝 *Чек-лист*", parse_mode="Markdown",
+    # обновляем именно то сообщение, что запомнили
+    await bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=msg_id,
+        text="📝 *Чек-лист*",
+        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-
 async def toggle_handler(update, context):
-    """
-    Принимает индекс пункта, меняет его статус и перерисовывает.
-    """
     from utils.storage import user_progress
 
     query = update.callback_query
     await query.answer()
+    _, ck_id, idx_str = query.data.split("|")
+    idx = int(idx_str)
 
-    _, ck_id, idx_str = query.data.split("|", 2)
-    i = int(idx_str)
+    # переключаем статус
+    data = user_progress[ck_id]
+    data["status"][idx] = next_status(data["status"][idx])
 
-    # Инвертируем статус
-    user_progress[ck_id]["status"][i] = not user_progress[ck_id]["status"][i]
-
-    # Перерисовываем
-    from handlers.checklist import send_checklist
-    await send_checklist(query, ck_id)
+    # перерисовываем в групповом сообщении
+    await send_checklist(context.bot, ck_id)
