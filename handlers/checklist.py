@@ -1,6 +1,9 @@
 # handlers/checklist.py
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import BadRequest
+
+from utils.storage import user_progress
 
 
 STATUS_ICONS = {
@@ -16,31 +19,40 @@ def next_status(current):
     return order[(idx + 1) % len(order)]
 
 
+
 async def send_checklist(bot, ck_id: str):
     """
-    Рисует или обновляет чек-лист в общем чате.
+    Обновляет сообщение с чек-листом в общем чате.
     """
-    from utils.storage import user_progress
+    
+
     data = user_progress[ck_id]
     chat_id = data["chat_id"]
-    msg_id = data["message_id"]
+    message_id = data["message_id"]
 
+    # Строим кнопки
     keyboard = []
     for idx, text in enumerate(data["items"]):
         icon = STATUS_ICONS[data["status"][idx]]
         cb = f"toggle|{ck_id}|{idx}"
         keyboard.append([InlineKeyboardButton(f"{icon} {text}", callback_data=cb)])
 
-    keyboard.append([InlineKeyboardButton("📤 Отправить отчёт", callback_data=f"report|{ck_id}")])
+    # Добавляем кнопку отправки отчета
+    keyboard.append([
+        InlineKeyboardButton("📤 Отправить отчёт", callback_data=f"report|{ck_id}")
+    ])
 
-    # обновляем именно то сообщение, что запомнили
-    await bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=msg_id,
-        text="📝 *Чек-лист*",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text="📝 *Чек-лист*",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except BadRequest as e:
+        if "Message is not modified" not in str(e):
+            raise
 
 async def toggle_handler(update, context):
     from utils.storage import user_progress

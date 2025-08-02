@@ -1,17 +1,16 @@
-# utils/storage.py
-
 import json
 from pathlib import Path
-from config.config import CHECKLISTS_FILE
+from config.config import CHECKLISTS_FILE, DYNAMIC_FILE
 
-# 1) Загружаем шаблоны чек-листов из JSON
-#    Path(__file__).parent.parent — это корень проекта
-CHECKLISTS_PATH = Path(__file__).resolve().parent.parent / CHECKLISTS_FILE
+BASE = Path(__file__).resolve().parent.parent
 
-with open(CHECKLISTS_PATH, encoding="utf-8") as f:
+# 1) Статические шаблоны
+with open(BASE / CHECKLISTS_FILE, encoding="utf-8") as f:
     CHECKLISTS = json.load(f)
 
-# 2) Здесь будут храниться состояния активных чек-листов.
-#    Ключ — это ваш ck_id, а значение — словарь с полями:
-#      place, user, title, timestamp, items, status, chat_id, message_id
+# 2) Динамические шаблоны
+with open(BASE / DYNAMIC_FILE, encoding="utf-8") as f:
+    DYNAMIC = json.load(f)
+
+# 3) Состояния запущенных чек-листов
 user_progress = {}
