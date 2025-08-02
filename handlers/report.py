@@ -37,8 +37,8 @@ async def report_handler(update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 *Сотрудник*: {data['user']}\n"
         f"🕒 *Начало*: {data['timestamp']}\n\n"
         f"✅ Выполнено: *{counts['done']}*\n"
-        f"❌ Не выполнено: *{counts['skipped']}*\n"
-        f"⚪ Проигнорировано: *{counts['ignored']}*\n"
+        f"❌ Провалена/отменено: *{counts['skipped']}*\n"
+        f"⚠️ Не понятно: *{counts['ignored']}*\n"
         f"⬜ Не отмечено: *{counts['none']}*\n\n"
         f"📝 *Копия чек-листа:*\n{checklist_copy}"
     )

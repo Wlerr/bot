@@ -7,7 +7,7 @@ STATUS_ICONS = {
     None: "⬜",       # не отмечено
     "done": "✅",    # выполнено
     "skipped": "❌", # не выполнено
-    "ignored": "⚪"  # проигнорировано
+    "ignored": "⚠️"  # проигнорировано
 }
 
 def next_status(current):
