@@ -14,37 +14,29 @@ from telegram.ext import (
     filters,
 )
 
-# Импорты из вашего проекта
 from config.config import ADMIN_CHAT_ID, DYNAMIC_FILE, REPORT_CHAT_IDS
 from utils.storage import CHECKLISTS, DYNAMIC, user_progress
 from handlers.checklist import send_checklist
 
-# Состояния для ConversationHandler
+# Состояния для создания
 ASK_PLACE, ASK_TITLE, ASK_ITEMS, CONFIRM = range(4)
 
-# Список Telegram user_id пользователей-руководителей
-ADMINS = {
-    512193226,  # замените на реальные ID ваших администраторов
-}
+# Telegram user_id админов, которым разрешено создавать чек-листы
+ADMINS = {512193226, 987654321}  # <-- замените на реальные ID руководителей
 
 
 async def newchecklist_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Точка входа для создания нового динамического шаблона.
-    Срабатывает на команду /newchecklist, только в админ-чате.
-    """
-    """
-    # 1) Разрешаем только в админском чате
+    # 1) Только в вашем админ-чате
     if update.effective_chat.id != ADMIN_CHAT_ID:
         return
-"""
 
-    # 2) Проверяем, что отправитель — в списке ADMINS
-    if update.effective_user.id not in ADMINS:
-        await update.message.reply_text("❌ У вас нет прав для этой команды.")
+    # 2) Только определённые пользователи
+    user_id = update.effective_user.id
+    if user_id not in ADMINS:
+        await update.message.reply_text("❌ У вас нет прав создавать чек-листы.")
         return ConversationHandler.END
 
-    # 3) Предлагаем выбрать чайную из статических шаблонов
+    # 3) Начинаем диалог: выбор чайной
     keyboard = [
         [InlineKeyboardButton(place, callback_data=place)]
         for place in CHECKLISTS.keys()
@@ -57,53 +49,41 @@ async def newchecklist_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def ask_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    После выбора чайной: спрашиваем название нового чек-листа.
-    """
-    # Сохраняем выбранную чайную
-    place = update.callback_query.data
-    context.user_data["place"] = place
+    # И здесь проверяем админ-чат и права ещё раз (на всякий случай)
+    if update.effective_chat.id != ADMIN_CHAT_ID or update.effective_user.id not in ADMINS:
+        return ConversationHandler.END
 
-    # Подтверждаем выбор и просим ввести название
+    context.user_data["place"] = update.callback_query.data
     await update.callback_query.answer()
-    await update.callback_query.edit_message_text("✏️ Введите название нового чек-листа:")
+    await update.callback_query.edit_message_text("✏️ Введите название чек-листа:")
     return ASK_TITLE
 
 
 async def ask_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    После получения названия: спрашиваем пункты.
-    """
-    # Сохраняем название
-    title = update.message.text.strip()
-    context.user_data["title"] = title
+    # Проверка прав
+    if update.effective_chat.id != ADMIN_CHAT_ID or update.effective_user.id not in ADMINS:
+        return ConversationHandler.END
 
-    # Инструкция по вводу пунктов
+    context.user_data["title"] = update.message.text.strip()
     await update.message.reply_text(
         "🗒 Теперь введите пункты через новую строку.\n"
-        "Пример:\n"
-        "Пункт 1\n"
-        "Пункт 2\n"
-        "Пункт 3"
+        "Пример:\nПункт 1\nПункт 2\n…"
     )
     return ASK_ITEMS
 
 
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Показываем предпросмотр и просим подтвердить сохранение.
-    """
-    # Разбиваем текст по строкам — получаем список пунктов
+    # Проверка прав
+    if update.effective_chat.id != ADMIN_CHAT_ID or update.effective_user.id not in ADMINS:
+        return ConversationHandler.END
+
     items = [line.strip() for line in update.message.text.splitlines() if line.strip()]
     context.user_data["items"] = items
 
-    # Собираем предпросмотр
-    preview = "\n".join(f"– {item}" for item in items)
+    preview = "\n".join(f"– {i}" for i in items)
     await update.message.reply_text(
-        f"Сохраняем чек-лист:\n\n"
-        f"Название: *{context.user_data['title']}*\n"
-        f"Чайная: *{context.user_data['place']}*\n\n"
-        f"{preview}\n\n"
+        f"Сохраним чек-лист «{context.user_data['title']}» для "
+        f"{context.user_data['place']}:\n\n{preview}\n\n"
         "Подтвердите /yes или отмените /no",
         parse_mode="Markdown"
     )
@@ -111,56 +91,45 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def save_dynamic(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    При подтверждении сохраняем новый шаблон в dynamic.json.
-    """
-    text = update.message.text.strip().lower()
-    if text != "/yes":
-        await update.message.reply_text("❌ Создание шаблона отменено.")
+    # Проверяем право на сохранение
+    if update.effective_chat.id != ADMIN_CHAT_ID or update.effective_user.id not in ADMINS:
         return ConversationHandler.END
 
-    # Формируем новую запись
+    if update.message.text.strip().lower() != "/yes":
+        await update.message.reply_text("❌ Отмена.")
+        return ConversationHandler.END
+
     new_id = uuid4().hex[:8]
     entry = {
-        "id": new_id,
+        "id":    new_id,
         "place": context.user_data["place"],
         "title": context.user_data["title"],
         "items": context.user_data["items"],
     }
     DYNAMIC.append(entry)
-
-    # Перезаписываем файл dynamic.json
     with open(DYNAMIC_FILE, "w", encoding="utf-8") as f:
         json.dump(DYNAMIC, f, ensure_ascii=False, indent=2)
 
-    await update.message.reply_text(
-        f"✅ Шаблон сохранён! Его ID: `{new_id}`",
-        parse_mode="Markdown"
-    )
+    await update.message.reply_text(f"✅ Шаблон сохранён! Его ID: `{new_id}`", parse_mode="Markdown")
     return ConversationHandler.END
 
 
 async def publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Команда /publish <ID> публикует готовый шаблон в соответствующий чат.
-    """
-    # 1) Проверяем чат и права
+    # Тоже проверяем права и чат
     if update.effective_chat.id != ADMIN_CHAT_ID:
         return
     if update.effective_user.id not in ADMINS:
         await update.message.reply_text("❌ У вас нет прав.")
         return
 
-    # 2) Разбор команды
     parts = update.message.text.split()
     if len(parts) != 2:
         return await update.message.reply_text("Использование: /publish <ID>")
 
     tpl = next((d for d in DYNAMIC if d["id"] == parts[1]), None)
     if not tpl:
-        return await update.message.reply_text("❌ Шаблон с таким ID не найден.")
+        return await update.message.reply_text("❌ Шаблон не найден.")
 
-    # 3) Инициализация прогресса по аналогии со статическим чек-листом
     ck_id = uuid4().hex[:8]
     user_progress[ck_id] = {
         "place": tpl["place"],
@@ -173,30 +142,19 @@ async def publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "message_id": None
     }
 
-    # 4) Публикуем интерактивный чек-лист
-    sent = await update.message.reply_text(
-        f"📝 *{tpl['title']}*",
-        parse_mode="Markdown"
-    )
+    sent = await update.message.reply_text(f"📝 *{tpl['title']}*", parse_mode="Markdown")
     user_progress[ck_id]["message_id"] = sent.message_id
-
-    # 5) Отрисовываем кнопки и пункты
     await send_checklist(context.bot, ck_id)
 
 
-# ConversationHandler для создания шаблона
 conv = ConversationHandler(
     entry_points=[CommandHandler("newchecklist", newchecklist_start)],
-
     states={
         ASK_PLACE: [CallbackQueryHandler(ask_title)],
         ASK_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_items)],
         ASK_ITEMS: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm)],
         CONFIRM:  [MessageHandler(filters.Regex("^(?:/yes|/no)$"), save_dynamic)],
     },
-
-    # Команда /cancel в любой момент завершает разговор
     fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
-
-    allow_reentry=True  # позволяет заново войти в разговор
+    allow_reentry=True
 )
