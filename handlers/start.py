@@ -10,7 +10,7 @@ async def start_command(update, context: ContextTypes.DEFAULT_TYPE):
         # если в группе — даём инструкцию
         await context.bot.send_message(
             chat_id=chat.id,
-            text="👋 Чтобы начать отчёт по чек-листу, напишите мне в личку: @ВашBotUsername"
+            text="👋 Чтобы начать отчёт по чек-листу, напишите мне в личку: @cha108work_bot"
         )
         return
 

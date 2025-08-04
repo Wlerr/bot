@@ -6,10 +6,12 @@ from datetime import datetime
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
-
+import json
 from utils.storage import CHECKLISTS, DYNAMIC, user_progress
-from config.config import REPORT_CHAT_IDS
+from config.config import REPORT_CHAT_IDS, DYNAMIC_FILE
 from handlers.checklist import send_checklist
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +40,11 @@ async def place_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+
     # Разбираем место и сохраняем
     _, place = query.data.split("|", 1)
     context.user_data["place"] = place
+
 
     # Собираем списки
     static_names = list(CHECKLISTS.get(place, {}).keys())
@@ -61,6 +65,8 @@ async def place_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([
         InlineKeyboardButton("← Назад", callback_data="back|main")
     ])
+
+
 
     # Отправляем/редактируем сообщение
     await query.edit_message_text(
@@ -88,22 +94,32 @@ async def checklist_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Получаем пункты чек-листа
+# … ваше начало checklist_handler …
+
     if prefix == "static":
         items = CHECKLISTS.get(place, {}).get(ident)
-        title = ident  # просто имя шаблона — идентификатор
-    else:  # dynamic
+        title = ident
+    elif prefix == "dynamic":
         tpl = next((d for d in DYNAMIC if d["id"] == ident and d["place"] == place), None)
         if not tpl:
             await query.edit_message_text("❗ Динамический чек-лист не найден.")
             return
-        items = tpl["items"] 
+        items = tpl["items"]
         title = tpl["title"]
+
+        # — одноразовый? удалим из DYNAMIC
+        if tpl.get("one_time"):
+            DYNAMIC.remove(tpl)
+            from utils.storage import DYNAMIC_FILE  # импорт тут, чтобы избежать циклов
+            with open(DYNAMIC_FILE, "w", encoding="utf-8") as f:
+                json.dump(DYNAMIC, f, ensure_ascii=False, indent=2)
+    else:
+        await query.edit_message_text("❗ Неизвестный тип чек-листа.")
+        return
 
     if not items:
         await query.edit_message_text("❗ Чек-лист не найден.")
         return
-
-
 
     # Создаём уникальный ID сессии и сохраняем прогресс
     from uuid import uuid4
@@ -129,7 +145,21 @@ async def checklist_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     # Информируем пользователя и публикуем в чат чайной
-    await query.edit_message_text("⏳ Отправка чек-листа…")
+    await query.edit_message_text(
+    """    Чеклист сейчас появится в нужном чате! 
+
+    Нажимая, отмечайте 🍃 то, что выполнено без вопросов.
+
+    Второе нажатие проставит статус проблемы/неисправности ⚠️.
+
+    Третьим нажатием установите отметку ⁉️, если есть вопросы или что-то мешает выполнению.
+
+    Четвёртое нажатие вернёт пункт в состояние «не отмечено».
+
+    После прохождения чек-листа отправьте его, нажав кнопку «📤 Отправить отчёт» в конце списка.
+
+    """
+    )
     sent = await context.bot.send_message(
         chat_id=user_progress[ck_id]["chat_id"],
         text=f"📝 *{title}*\nНачато: {user_progress[ck_id]['timestamp']}",
@@ -145,4 +175,15 @@ async def checklist_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await start_command(update, context)  # просто заново вызывает старт
+
+    # Здесь заново рисуем меню самой первой функции start_command
+    # Но нужно именно редактировать сообщение, а не слать новое:
+    keyboard = [
+        [InlineKeyboardButton(place, callback_data=f"place|{place}")]
+        for place in CHECKLISTS.keys()
+    ]
+    await query.edit_message_text(
+        text="👋 *Выберите чайную:*",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )

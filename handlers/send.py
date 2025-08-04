@@ -1,35 +1,33 @@
 # handlers/send.py
 
-import logging
+import json
 from uuid import uuid4
 from datetime import datetime
 
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler
 
 from utils.storage import CHECKLISTS, DYNAMIC, user_progress
-from config.config import REPORT_CHAT_IDS
+from config.config import REPORT_CHAT_IDS, DYNAMIC_FILE
 from handlers.checklist import send_checklist
-
-logger = logging.getLogger(__name__)
 
 async def send_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Обрабатывает команду /send <название>
-    и сразу публикует интерактивный чек-лист в этом же чате.
+    /send <название_чеклиста>
+    Ищет шаблон в статических и динамических чек-листах для текущего чата,
+    публикует его один раз и делает одноразовый динамический чек-лист недоступным.
     """
     chat_id = update.effective_chat.id
-    args = context.args  # всё, что введено после /send
+    args = context.args  # список слов после команды
 
-    # 1) Проверьли, что указан аргумент
+    # 1) Проверка: указан ли аргумент
     if not args:
         return await update.message.reply_text(
             "❗ Использование: /send <название_чеклиста>\n"
             "Пример: /send Открытие"
         )
 
-    # 2) Определяем «место» по текущему чату
-    #    (например, если бот только в чатах Тверская и Покровка)
+    # 2) Определяем, для какой «чайной» этот чат
     place = None
     for p, cid in REPORT_CHAT_IDS.items():
         if cid == chat_id:
@@ -40,46 +38,74 @@ async def send_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❗ Этот чат не зарегистрирован для отправки чек-листов."
         )
 
-    name = " ".join(args)  # название чек-листа может состоять из нескольких слов
-    logger.info("Вызов чек-листа %s для чайной %s (чат %s)", name, place, chat_id)
+    # 3) Собираем полное название чек-листа
+    title = " ".join(args)
 
-    # 3) Ищем в статических
-    items = CHECKLISTS.get(place, {}).get(name)
+    # 4) Ищем в статических шаблонах
+    items = CHECKLISTS.get(place, {}).get(title)
     prefix = "static"
-    tpl_id = name
+    tpl_id = title
 
-    # 4) Если не нашли — ищем в динамических по title
+    # 5) Если не нашли — ищем в динамических по title
     if items is None:
-        dyn = next((d for d in DYNAMIC if d["place"] == place and d["title"] == name), None)
+        dyn = next(
+            (d for d in DYNAMIC if d["place"] == place and d["title"] == title),
+            None
+        )
         if dyn:
             items = dyn["items"]
             prefix = "dynamic"
             tpl_id = dyn["id"]
 
-    if items is None:
-        return await update.message.reply_text(f"❗ Чек-лист «{name}» не найден для «{place}».")
+            # 5a) Если это одноразовый динамический чек-лист — удаляем его
+            if dyn.get("one_time"):
+                DYNAMIC.remove(dyn)
+                with open(DYNAMIC_FILE, "w", encoding="utf-8") as f:
+                    json.dump(DYNAMIC, f, ensure_ascii=False, indent=2)
 
-    # 5) Инициализируем новую сессию
+    # 6) Если всё ещё не найден — сообщаем об ошибке
+    if items is None:
+        return await update.message.reply_text(
+            f"❗ Чек-лист «{title}» не найден для «{place}»."
+        )
+
+    # 7) Инициализируем новую сессию чек-листа
     ck_id = uuid4().hex[:8]
     context.user_data["ck_id"] = ck_id
-    title = name
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user_progress[ck_id] = {
         "place": place,
         "user": update.effective_user.full_name,
         "title": title,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": timestamp,
         "items": items,
         "status": [None] * len(items),
         "chat_id": chat_id,
         "message_id": None,
     }
 
-    # 6) Публикуем первое сообщение
-    sent = await update.message.reply_text(
-        f"📝 *{title}*\nНачало: {user_progress[ck_id]['timestamp']}",
-        parse_mode="Markdown"
+    # 8) Публикуем вступительное сообщение
+    intro = (
+        f"🟢 Чек-лист *{title}* запущен!\n"
+        f"Начало: {user_progress[ck_id]['timestamp']}\n\n"
+        """"
+Нажимая, отмечайте 🍃 то, что выполнено без вопросов.
+
+Второе нажатие проставит статус проблемы/неисправности ⚠️.
+
+Третьим нажатием установите отметку ⁉️, если есть вопросы или что-то мешает выполнению.
+
+Четвёртое нажатие вернёт пункт в состояние «не отмечено».
+
+После прохождения чек-листа отправьте его, нажав кнопку «📤 Отправить отчёт» в конце списка.
+"""
     )
+    sent = await update.message.reply_text(intro, parse_mode="Markdown")
     user_progress[ck_id]["message_id"] = sent.message_id
 
-    # 7) Рисуем интерактивный чек-лист
+    # 9) Рисуем интерактивный чек-лист (кнопки)
     await send_checklist(context.bot, ck_id)
+
+
+# Регистрируем хендлер в bot.py так:
+# app.add_handler(CommandHandler("send", send_handler))
